@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Highway Pollution Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',sans-serif; background:#0f1117; color:#e0e0e0; }
+  .header { background:linear-gradient(135deg,#1a1a2e,#16213e); padding:16px 28px;
+    display:flex; align-items:center; justify-content:space-between;
+    border-bottom:2px solid #0f3460; }
+  .header h1 { font-size:20px; color:#fff; font-weight:600; }
+  .header .sub { font-size:13px; color:#8ab4f8; margin-top:3px; }
+  .live-badge { background:#e53935; color:#fff; padding:4px 12px;
+    border-radius:20px; font-size:12px; font-weight:600; animation:pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; padding:20px 24px 0; }
+  .card { background:#1e2130; border-radius:12px; padding:18px; border:1px solid #2a2d3e; }
+  .card .label { font-size:11px; color:#8b8fa8; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; }
+  .card .value { font-size:28px; font-weight:700; color:#fff; }
+  .card .unit { font-size:12px; color:#8b8fa8; margin-top:2px; }
+  .card.green .value { color:#4caf50; }
+  .card.red .value { color:#ef5350; }
+  .card.blue .value { color:#42a5f5; }
+  .card.amber .value { color:#ffa726; }
+  .charts-row { display:grid; grid-template-columns:2fr 1fr 1fr; gap:14px; padding:14px 24px; }
+  .chart-card { background:#1e2130; border-radius:12px; padding:18px; border:1px solid #2a2d3e; }
+  .chart-card h3 { font-size:13px; color:#8b8fa8; margin-bottom:14px; text-transform:uppercase; }
+  .bottom-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; padding:0 24px 20px; }
+  .table-card { background:#1e2130; border-radius:12px; padding:18px; border:1px solid #2a2d3e; }
+  .table-card h3 { font-size:13px; color:#8b8fa8; margin-bottom:12px; text-transform:uppercase; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:#5f6368; font-weight:500; padding:6px 8px; border-bottom:1px solid #2a2d3e; }
+  td { padding:8px; border-bottom:1px solid #1a1d2e; }
+  tr:last-child td { border-bottom:none; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+  .tag-bev { background:#1b5e20; color:#69f0ae; }
+  .tag-fcev { background:#0d47a1; color:#82b1ff; }
+  .tag-hev { background:#e65100; color:#ffcc80; }
+  .tag-fuel { background:#37474f; color:#cfd8dc; }
+  .info-bar { background:#161822; padding:8px 24px; font-size:12px; color:#5f6368; border-top:1px solid #2a2d3e; }
+  canvas { max-height:200px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>Highway Pollution Prediction Dashboard</h1>
+    <div class="sub">Gyeongbu Expressway · Camera: HWY-A-CAM-003 · 10-min windows</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div id="clock" style="font-size:14px;color:#8ab4f8"></div>
+    <div class="live-badge">LIVE</div>
+  </div>
+</div>
+<div class="grid">
+  <div class="card red"><div class="label">Total CO2 (session)</div><div class="value" id="total-co2">--</div><div class="unit">kilograms</div></div>
+  <div class="card amber"><div class="label">Total CO (session)</div><div class="value" id="total-co">--</div><div class="unit">grams</div></div>
+  <div class="card blue"><div class="label">Vehicles counted</div><div class="value" id="total-veh">--</div><div class="unit">this session</div></div>
+  <div class="card green"><div class="label">Zero-emission %</div><div class="value" id="zev-pct">--</div><div class="unit">current window</div></div>
+</div>
+<div class="charts-row">
+  <div class="chart-card"><h3>CO2 per window (kg)</h3><canvas id="co2Chart"></canvas></div>
+  <div class="chart-card"><h3>Engine type mix</h3><canvas id="engineChart"></canvas></div>
+  <div class="chart-card"><h3>Vehicle type mix</h3><canvas id="typeChart"></canvas></div>
+</div>
+<div class="bottom-row">
+  <div class="table-card"><h3>Engine breakdown</h3>
+    <table id="engine-table"><thead><tr><th>Engine</th><th>Vehicles</th><th>CO2 est.</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="table-card"><h3>Vehicle type breakdown</h3>
+    <table id="type-table"><thead><tr><th>Type</th><th>Count</th><th>% traffic</th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+<div class="info-bar">Emission factors: COPERT 5 (EEA) · Highway speed: 95 km/h · Window: 10 min · Distance/vehicle: ~15.8 km · PIPA compliant</div>
+<script>
+const DIST=95*(10/60);
+const ENGINE_FACTORS={Fuel:142,HeV:98,BEV:0,FCEV:0};
+const TAG_CLASS={Fuel:'tag-fuel',HeV:'tag-hev',BEV:'tag-bev',FCEV:'tag-fcev'};
+setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString();},1000);
+const co2Chart=new Chart(document.getElementById('co2Chart'),{type:'bar',data:{labels:[],datasets:[{label:'CO2 (kg)',data:[],backgroundColor:'rgba(239,83,80,0.7)',borderColor:'#ef5350',borderWidth:1,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa8'},grid:{color:'#2a2d3e'}},y:{ticks:{color:'#8b8fa8'},grid:{color:'#2a2d3e'}}}}});
+const engineChart=new Chart(document.getElementById('engineChart'),{type:'doughnut',data:{labels:['Fuel','HeV','BEV','FCEV'],datasets:[{data:[0,0,0,0],backgroundColor:['#546e7a','#ffa726','#4caf50','#42a5f5'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#8b8fa8',font:{size:10}}}}}});
+const typeChart=new Chart(document.getElementById('typeChart'),{type:'doughnut',data:{labels:['Sedan','SUV','Truck','Pickup','Van','Bus'],datasets:[{data:[0,0,0,0,0,0],backgroundColor:['#42a5f5','#26c6da','#ef5350','#ab47bc','#66bb6a','#ffa726'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#8b8fa8',font:{size:10}}}}}});
+async function refresh(){
+  const [summary,windows,live]=await Promise.all([fetch('/api/summary').then(r=>r.json()),fetch('/api/windows').then(r=>r.json()),fetch('/api/live').then(r=>r.json())]);
+  document.getElementById('total-co2').textContent=summary.total_co2_kg.toFixed(1);
+  document.getElementById('total-co').textContent=summary.total_co_g.toFixed(0);
+  document.getElementById('total-veh').textContent=summary.total_vehicles;
+  document.getElementById('zev-pct').textContent=live.electric_pct+'%';
+  co2Chart.data.labels=windows.map(w=>'W'+w.window);
+  co2Chart.data.datasets[0].data=windows.map(w=>w.co2_kg);
+  co2Chart.update();
+  const eng=live.by_engine||{};
+  engineChart.data.datasets[0].data=[eng.Fuel||0,eng.HeV||0,eng.BEV||0,eng.FCEV||0];
+  engineChart.update();
+  const typ=live.by_type||{};
+  typeChart.data.datasets[0].data=[typ.sedan||0,typ.suv||0,typ.truck||0,typ.pickup||0,typ.van||0,typ.bus||0];
+  typeChart.update();
+  const etbody=document.querySelector('#engine-table tbody');
+  etbody.innerHTML='';
+  for(const [engine,count] of Object.entries(eng).sort((a,b)=>b[1]-a[1])){
+    const co2est=(ENGINE_FACTORS[engine]||0)*DIST*count/1000;
+    etbody.innerHTML+='<tr><td><span class="tag '+(TAG_CLASS[engine]||'tag-fuel')+'">'+engine+'</span></td><td>'+count+'</td><td>'+co2est.toFixed(2)+' kg</td></tr>';
+  }
+  const ttbody=document.querySelector('#type-table tbody');
+  ttbody.innerHTML='';
+  const total=live.vehicles||1;
+  for(const [vtype,count] of Object.entries(typ).sort((a,b)=>b[1]-a[1])){
+    const pct=(count/total*100).toFixed(1);
+    ttbody.innerHTML+='<tr><td style="text-transform:capitalize">'+vtype+'</td><td>'+count+'</td><td>'+pct+'%</td></tr>';
+  }
+}
+async function tick(){await fetch('/api/tick');await refresh();}
+refresh();
+setInterval(tick,15000);
+</script>
+</body>
+</html>
